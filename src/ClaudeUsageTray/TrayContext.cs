@@ -16,7 +16,12 @@ internal sealed class TrayContext : ApplicationContext
   private readonly System.Windows.Forms.Timer _poll = new() { Interval = PollMilliseconds };
   private readonly System.Windows.Forms.Timer _debounce = new() { Interval = DebounceMilliseconds };
   private readonly ToolStripMenuItem _autostart;
+  private readonly ToolStripMenuItem _refreshNow;
+  private readonly ToolStripMenuItem _autoRefresh;
   private readonly Control _marshal = new();
+  private AppSettings _settings = AppSettings.Load(AppSettings.DefaultPath());
+  private DateTimeOffset? _lastAttempt;
+  private bool _isRefreshing;
   private FileSystemWatcher? _watcher;
   private Icon? _icon;
   private UsageSnapshot? _snapshot;
@@ -29,8 +34,21 @@ internal sealed class TrayContext : ApplicationContext
     _autostart = new ToolStripMenuItem("Start with Windows") { Checked = Autostart.IsEnabled(), CheckOnClick = true };
     _autostart.CheckedChanged += (_, _) => Autostart.Set(_autostart.Checked);
 
+    _refreshNow = new ToolStripMenuItem("Refresh from Claude Code (uses a little quota)");
+    _refreshNow.Click += (_, _) => RunClaudeRefresh();
+
+    _autoRefresh = new ToolStripMenuItem($"Auto-refresh every {AppSettings.AutoRefreshChoice} min")
+    {
+      Checked = _settings.IsAutoRefreshOn,
+      CheckOnClick = true,
+    };
+    _autoRefresh.CheckedChanged += (_, _) => SetAutoRefresh(_autoRefresh.Checked);
+
     var menu = new ContextMenuStrip();
-    menu.Items.Add("Refresh", null, (_, _) => Refresh());
+    menu.Items.Add("Reload feed", null, (_, _) => Refresh());
+    menu.Items.Add(_refreshNow);
+    menu.Items.Add(_autoRefresh);
+    menu.Items.Add(new ToolStripSeparator());
     menu.Items.Add(_autostart);
     menu.Items.Add("Open feed folder", null, (_, _) => OpenFeedFolder());
     menu.Items.Add(new ToolStripSeparator());
@@ -45,7 +63,11 @@ internal sealed class TrayContext : ApplicationContext
       }
     };
 
-    _poll.Tick += (_, _) => Refresh();
+    _poll.Tick += (_, _) =>
+    {
+      Refresh();
+      MaybeAutoRefresh();
+    };
     _poll.Start();
     _debounce.Tick += (_, _) =>
     {
@@ -116,6 +138,68 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     _popup.Update(_snapshot, now);
+  }
+
+  private void SetAutoRefresh(bool isOn)
+  {
+    _settings = new AppSettings(isOn ? AppSettings.AutoRefreshChoice : 0);
+    try
+    {
+      _settings.Save(AppSettings.DefaultPath());
+    }
+    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+    {
+      // The choice still applies for this run; it just will not survive a restart.
+    }
+
+    // Turning it on should not wait for a full interval before the first refresh.
+    _lastAttempt = null;
+  }
+
+  private void MaybeAutoRefresh()
+  {
+    var now = DateTimeOffset.Now;
+    if (RefreshPolicy.IsDue(_settings, _lastAttempt, now)
+      && RefreshPolicy.ShouldAutoRefresh(_settings, _snapshot, now, _isRefreshing))
+    {
+      RunClaudeRefresh();
+    }
+  }
+
+  private async void RunClaudeRefresh()
+  {
+    if (_isRefreshing)
+    {
+      return;
+    }
+
+    _isRefreshing = true;
+    _lastAttempt = DateTimeOffset.Now;
+    _refreshNow.Enabled = false;
+    _refreshNow.Text = "Refreshing...";
+    try
+    {
+      var isOk = await ClaudeRefresher.RunAsync();
+      if (!isOk)
+      {
+        _tray.ShowBalloonTip(
+          5000,
+          "Could not refresh from Claude Code",
+          "Is Claude Code installed and signed in? The last known numbers are still shown.",
+          ToolTipIcon.Warning);
+      }
+    }
+    catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception)
+    {
+      _tray.ShowBalloonTip(5000, "Could not run Claude Code", e.Message, ToolTipIcon.Warning);
+    }
+    finally
+    {
+      _isRefreshing = false;
+      _refreshNow.Enabled = true;
+      _refreshNow.Text = "Refresh from Claude Code (uses a little quota)";
+      Refresh();
+    }
   }
 
   private void TogglePopup()
