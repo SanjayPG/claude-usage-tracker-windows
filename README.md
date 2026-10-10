@@ -11,6 +11,16 @@ It is a standalone app. It is not part of the Claude desktop app, and it never r
 - **Alerts:** a notification once at 80% and once at 90% per window.
 - **After a reset:** shows "reset / waiting for data" instead of an old percentage.
 
+## Install
+
+1. Download **`ClaudeUsageTracker-Setup-v0.1.0.exe`** from the [Releases page](https://github.com/SanjayPG/claude-usage-tracker-windows/releases).
+2. Double-click it and follow the steps. It installs for your user only (no administrator prompt) and includes everything it needs, so there is nothing else to install first.
+3. Windows will probably show a blue "Windows protected your PC" screen, because the installer is not code-signed. Choose **More info**, then **Run anyway**, only if you trust it. You can check the download first against the SHA-256 on the release page.
+4. Tick **Start Claude Usage Tracker now** at the end. The icon appears in the tray next to the clock (on Windows 11, drag it out of the `^` arrow onto the taskbar).
+5. Right-click the icon and choose **Refresh from Claude Code**. After about 10 seconds the bars show your usage.
+
+You need [Claude Code](https://claude.com/claude-code) installed and signed in, on a Pro or Max plan. To remove the app, use Windows **Settings > Apps > Installed apps**.
+
 ## How it gets your numbers
 
 There are two sources, and the app shows whichever was updated most recently.
@@ -29,7 +39,7 @@ Claude Code + usage-tracker plugin (optional) ──────> usage-feed.jso
 ## Requirements
 
 - Windows. Built and tested on Windows 11 only; Windows 10 is untested.
-- The [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) (the SDK includes it).
+- The installer needs nothing else. Only if you build and run it from source do you need the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 - [Claude Code](https://claude.com/claude-code) installed and signed in, on a Pro or Max plan (usage figures are only reported for those plans).
 - Optional, for live updates, the plugin. At the Claude Code prompt:
 
@@ -48,6 +58,13 @@ publish\ClaudeUsageTray.exe
 ```
 
 On Windows 11, drag the icon out of the hidden-icons arrow onto the taskbar to keep it visible. To start it with Windows, tick **Start with Windows** in the menu, after copying the exe to a permanent folder (autostart remembers the exe's location).
+
+To build the installer yourself, install [Inno Setup 6](https://jrsoftware.org/isinfo.php), publish a self-contained exe, then compile the script:
+
+```
+dotnet publish src/ClaudeUsageTray -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=None -o publish-sc
+ISCC.exe installer\ClaudeUsageTracker.iss /DSourceExe=publish-sc\ClaudeUsageTray.exe /DOutputDir=dist
+```
 
 Developer switches:
 
