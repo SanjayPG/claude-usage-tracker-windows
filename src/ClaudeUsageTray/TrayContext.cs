@@ -114,7 +114,8 @@ internal sealed class TrayContext : ApplicationContext
 
   private void Refresh()
   {
-    _snapshot = FeedReader.Read(_feedPath);
+    // Two sources: the plugin's live feed, and our own last refresh. Whichever is newer wins.
+    _snapshot = Snapshots.Newest(FeedReader.Read(_feedPath), FeedReader.Read(FeedReader.RefreshPath()));
     var now = DateTimeOffset.Now;
 
     var next = TrayIconRenderer.Render(_snapshot, now);
@@ -185,7 +186,7 @@ internal sealed class TrayContext : ApplicationContext
         _tray.ShowBalloonTip(
           5000,
           "Could not refresh from Claude Code",
-          "Is Claude Code installed and signed in? The last known numbers are still shown.",
+          "Needs Claude Code installed and signed in on a Pro or Max plan. The last known numbers are still shown.",
           ToolTipIcon.Warning);
       }
     }

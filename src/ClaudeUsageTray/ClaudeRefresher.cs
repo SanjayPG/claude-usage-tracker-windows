@@ -1,9 +1,10 @@
 using System.Diagnostics;
+using ClaudeUsageTray.Core;
 
 namespace ClaudeUsageTray;
 
-// Runs one tiny request through the official Claude Code CLI. Claude Code reports your usage with
-// every reply, and the usage-tracker mod writes it to the feed, so no login token is ever touched here.
+// Runs one tiny request through the official Claude Code CLI. Claude Code prints your usage with
+// every reply, so it is read straight from that output and no login token is ever touched here.
 internal static class ClaudeRefresher
 {
   private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(120);
@@ -53,6 +54,10 @@ internal static class ClaudeRefresher
     };
     info.ArgumentList.Add("-p");
     info.ArgumentList.Add("Reply with just: ok");
+    // stream-json (which needs --verbose) includes the rate_limit_event carrying both usage windows.
+    info.ArgumentList.Add("--output-format");
+    info.ArgumentList.Add("stream-json");
+    info.ArgumentList.Add("--verbose");
 
     using var process = Process.Start(info);
     if (process is null)
@@ -62,8 +67,8 @@ internal static class ClaudeRefresher
 
     process.StandardInput.Close();
 
-    // Drain both pipes so a full buffer can never stall the child.
-    _ = process.StandardOutput.ReadToEndAsync();
+    // Drain both pipes so a full buffer can never stall the child; stdout is what we parse.
+    var stdout = process.StandardOutput.ReadToEndAsync();
     _ = process.StandardError.ReadToEndAsync();
 
     using var timeout = new CancellationTokenSource(Timeout);
@@ -85,6 +90,22 @@ internal static class ClaudeRefresher
       return false;
     }
 
-    return process.ExitCode == 0;
+    if (process.ExitCode != 0)
+    {
+      return false;
+    }
+
+    // Keep our own copy, so the numbers show even when the Claude Code plugin is not installed.
+    var snapshot = StreamParser.TryParse(await stdout, DateTimeOffset.Now);
+    if (snapshot is null)
+    {
+      return false;
+    }
+
+    var path = FeedReader.RefreshPath();
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    await File.WriteAllTextAsync(path, Snapshots.ToJson(snapshot));
+
+    return true;
   }
 }
